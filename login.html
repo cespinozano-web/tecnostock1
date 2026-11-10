@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inicio de Sesion</title>
+</head>
+<body>
+    <center>
+        <form action="validar_sesion.php" method="post">
+            <h1>Inicia Sesion en TecnoStock<h1>
+                <br>
+                <div>
+                    <h3><label for="usuario">usuario</label><h3>
+                    <input type="text" id="usuario" required placeholder="Ej: felipe@gmail.com" name="txt_usuario">
+                </div>
+                <div>
+                    <h3><label for="contrasena">contraseña</label><h3>
+                    <input type="password" id="contrasena" required placeholder="*********" name="txt_contrasena">
+                </div>
+            <button type="submit">Iniciar Sesion</button>
+        </form>
+    </center>
+</body>
+</html>
