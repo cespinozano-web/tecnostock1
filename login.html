@@ -3,23 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inicio de Sesion</title>
+    <title>Iniciar Sesión - TecnoStock</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #3b1e54;
+            background-image: linear-gradient(rgba(59, 30, 84, 0.78), rgba(30, 15, 45, 0.88)), 
+                              url('foticos/logo.png');
+            background-repeat: repeat;
+            background-size: 130px;
+            font-family: "Roboto Condensed", sans-serif;
+            color: #444;
+            height: 100vh;
+        }
+        .login-container {
+            margin-top: 70px;
+            max-width: 420px;
+        }
+        .login-card {
+            background: #ffffff;
+            padding: 40px 30px;
+            border-radius: 0px; 
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+        }
+        .login-card h2 {
+            margin-bottom: 10px;
+            font-weight: 700;
+            color: #3b1e54;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .btn-tecnostock {
+            background-color: #3b1e54;
+            border-color: #3b1e54;
+            color: #fff;
+            padding: 10px;
+            font-size: 16px;
+            font-weight: 400;
+            transition: 0.2s;
+            border-radius: 0px;
+        }
+        .btn-tecnostock:hover {
+            background-color: #261337;
+            border-color: #261337;
+            color: #fff;
+        }
+    </style>
 </head>
 <body>
-    <center>
-        <form action="validar_sesion.php" method="post">
-            <h1>Inicia Sesion en TecnoStock<h1>
-                <br>
-                <div>
-                    <h3><label for="usuario">usuario</label><h3>
-                    <input type="text" id="usuario" required placeholder="Ej: felipe@gmail.com" name="txt_usuario">
+    <div class="container login-container">
+        <div class="login-card text-center">
+            <h2><strong>TecnoStock</strong></h2>
+            <p class="text-muted" style="margin-bottom: 25px;">Ingresa tus credenciales para acceder</p>
+            
+            <form action="validar_sesion.php" method="post">
+                <div class="form-group text-left">
+                    <label for="usuario">Usuario / Correo</label>
+                    <input type="text" class="form-control" id="usuario" required placeholder="Ej: felipe@gmail.com" name="txt_usuario" style="border-radius: 0px;">
                 </div>
-                <div>
-                    <h3><label for="contrasena">contraseña</label><h3>
-                    <input type="password" id="contrasena" required placeholder="*********" name="txt_contrasena">
+                
+                <div class="form-group text-left">
+                    <label for="contrasena">Contraseña</label>
+                    <input type="password" class="form-control" id="contrasena" required placeholder="*********" name="txt_contrasena" style="border-radius: 0px;">
                 </div>
-            <button type="submit">Iniciar Sesion</button>
-        </form>
-    </center>
+                
+                <button type="submit" class="btn btn-tecnostock btn-block">Iniciar Sesión</button>
+            </form>
+        </div>
+    </div>
 </body>
 </html>
