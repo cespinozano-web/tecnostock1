@@ -1,6 +1,7 @@
 <?php
 $pagina_actual = basename($_SERVER['PHP_SELF']);
 $es_perfil = ($pagina_actual == 'misDatos.php');
+$mostrar_admin = function_exists('esAdmin') ? esAdmin() : in_array(strtolower(trim((string)($_SESSION['nombre_cargo'] ?? ''))), ['admin', 'administrador', 'owner'], true);
 ?>
 
 <style>
@@ -19,66 +20,9 @@ $es_perfil = ($pagina_actual == 'misDatos.php');
         -webkit-tap-highlight-color: transparent;
     }
 
-    /* Botón hamburguesa del header / barra superior en morado */
-    .navbar-toggle,
-    .navbar-toggle:hover,
-    .navbar-toggle:focus,
-    .navbar-toggle:active,
-    [data-toggle="sidebar"],
-    [data-toggle="sidebar"]:hover,
-    [data-toggle="sidebar"]:focus,
-    [data-toggle="sidebar"]:active,
-    .btn-toggle-sidebar,
-    .btn-toggle-sidebar:hover,
-    .btn-toggle-sidebar:focus,
-    .btn-toggle-sidebar:active,
-    .sidebar-toggle,
-    .sidebar-toggle:hover,
-    .sidebar-toggle:focus,
-    .sidebar-toggle:active {
-        color: #673ab7 !important;
-        border-color: #dfd3f7 !important;
-        background-color: #f6f3fb !important;
-        outline: 0 !important;
-        box-shadow: none !important;
-    }
-
-    .navbar-toggle .icon-bar,
-    .navbar-toggle:hover .icon-bar,
-    .navbar-toggle:focus .icon-bar {
-        background-color: #673ab7 !important;
-    }
-
-    .navbar-toggle .fa,
-    [data-toggle="sidebar"] .fa,
-    .btn-toggle-sidebar .fa,
-    .sidebar-toggle .fa,
-    .navbar-toggle .glyphicon,
-    [data-toggle="sidebar"] .glyphicon {
-        color: #673ab7 !important;
-    }
-
-    /* Estado oculto del sidebar cuando se presiona el botón hamburguesa */
-    body.sidebar-collapsed .msb,
-    .msb.sidebar-hidden,
-    .msb.is-hidden,
-    .msb.collapsed {
-        margin-left: -250px !important;
-        transform: translateX(-100%);
-        transition: margin-left 0.25s ease, transform 0.25s ease;
-    }
-
-    body.sidebar-collapsed .mcw,
-    .mcw.sidebar-expanded {
-        margin-left: 0 !important;
-        width: 100% !important;
-        transition: margin-left 0.25s ease, width 0.25s ease;
-    }
-
     .msb {
         background-color: #f6f3fb;
         border-right: 1px solid #e3daf2;
-        transition: margin-left 0.25s ease, transform 0.25s ease;
     }
 
     .msb .navbar-header {
@@ -193,7 +137,6 @@ $es_perfil = ($pagina_actual == 'misDatos.php');
         transform: rotate(180deg);
     }
 
-    /* Dialog de confirmación de cierre de sesión */
     #modalCerrarSesion {
         z-index: 10070 !important;
     }
@@ -278,6 +221,12 @@ $es_perfil = ($pagina_actual == 'misDatos.php');
                 <li class="<?php echo ($pagina_actual == 'bodega.php') ? 'active' : ''; ?>">
                     <a href="bodega.php" onmousedown="this.blur();"><i class="fa fa-cubes"></i> Bodega</a>
                 </li>
+
+                <?php if ($mostrar_admin): ?>
+                    <li class="<?php echo ($pagina_actual == 'movimientos.php') ? 'active' : ''; ?>">
+                        <a href="movimientos.php" onmousedown="this.blur();"><i class="fa fa-exchange"></i> Movimientos</a>
+                    </li>
+                <?php endif; ?>
 
                 <li class="panel panel-default <?php echo $es_perfil ? 'active' : ''; ?>" id="dropdown">
                     <a href="javascript:void(0);" id="btnTogglePerfil" onmousedown="this.blur();" aria-expanded="<?php echo $es_perfil ? 'true' : 'false'; ?>">
@@ -372,33 +321,7 @@ $es_perfil = ($pagina_actual == 'misDatos.php');
         limpiarBackdropsSesion();
     }
 
-    function toggleSidebarPrincipal() {
-        const msb = document.getElementById("msb");
-        const mcw = document.querySelector(".mcw");
-        if (!msb) return;
-
-        document.body.classList.toggle("sidebar-collapsed");
-        msb.classList.toggle("sidebar-hidden");
-        msb.classList.toggle("collapsed");
-        if (mcw) {
-            mcw.classList.toggle("sidebar-expanded");
-        }
-    }
-
     document.addEventListener("click", function (evento) {
-        // 1. Botón hamburguesa / toggle del sidebar
-        const triggerSidebar = evento.target.closest(
-            '.navbar-toggle, [data-toggle="sidebar"], .btn-toggle-sidebar, .sidebar-toggle, #btnToggleSidebar, #menu-toggle'
-        );
-        if (triggerSidebar) {
-            evento.preventDefault();
-            evento.stopPropagation();
-            if (typeof triggerSidebar.blur === "function") triggerSidebar.blur();
-            toggleSidebarPrincipal();
-            return;
-        }
-
-        // 2. Desplegable "Mi Perfil" con animación de cortina
         const btnPerfil = evento.target.closest("#btnTogglePerfil");
         if (btnPerfil) {
             evento.preventDefault();
@@ -414,7 +337,6 @@ $es_perfil = ($pagina_actual == 'misDatos.php');
             return;
         }
 
-        // 3. Abrir dialog de confirmación al pulsar "Cerrar Sesión"
         const btnAbrirSesion = evento.target.closest("#btnAbrirModalCerrarSesion");
         if (btnAbrirSesion) {
             evento.preventDefault();
@@ -423,7 +345,6 @@ $es_perfil = ($pagina_actual == 'misDatos.php');
             return;
         }
 
-        // 4. Cerrar dialog con Cancelar o la X
         if (evento.target.closest("#btnCancelarCerrarSesion, #btnCerrarModalSesionX")) {
             evento.preventDefault();
             cerrarModalCerrarSesion();

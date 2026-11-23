@@ -2,6 +2,18 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
+function esAdmin(): bool {
+    $cargo = strtolower(trim((string)($_SESSION['nombre_cargo'] ?? '')));
+    return in_array($cargo, ['admin', 'administrador', 'dueño', 'dueno', 'owner'], true);
+}
+
+function exigirAdmin(string $redirigirA = 'inicio.php'): void {
+    if (!esAdmin()) {
+        header("Location: " . $redirigirA);
+        exit();
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -11,6 +23,7 @@ if (session_status() === PHP_SESSION_NONE) {
     <title>TecnoStock</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="foticos/favicon.ico">
     <style>
         body {
             margin-top: 50px;

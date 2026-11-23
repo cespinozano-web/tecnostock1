@@ -17,19 +17,86 @@ $conexion = new mysqli($servidor, $usuario_db, $password_db, $base_datos);
 if ($conexion->connect_error) {
     die("Error de conexión: " . $conexion->connect_error);
 }
+$conexion->set_charset("utf8mb4");
 
-$id_usuario_actual = $_SESSION['id_usuario'];
+function formatearObservacionHistorial(?string $obs): string {
+    $trimObs = trim((string)($obs ?? ''));
+    if ($trimObs === '') {
+        return '<span class="text-muted">Sin observación</span>';
+    }
+    $normalizado = preg_replace('/<br\s*\/?>/i', "\n", $trimObs);
+    $lineas = preg_split('/\r?\n/', (string)$normalizado);
+    $escapadas = array_map(function ($linea) {
+        return htmlspecialchars($linea, ENT_QUOTES, 'UTF-8');
+    }, $lineas);
+    return implode('<br>', $escapadas);
+}
 
-$sql = "SELECT m.id_movimiento, m.fecha_hora_movimiento, m.tipo_movimiento, m.cantidad_movimiento, m.observacion_movimiento, p.nombre_producto 
+function resolverCategoriaHistorial(array $row): ?string {
+    $tipo = strtolower(trim((string)($row['tipo_movimiento'] ?? '')));
+    $obs = strtolower((string)($row['observacion_movimiento'] ?? ''));
+    $estado = (int)($row['estado_movimiento'] ?? 1);
+
+    // Prioridad 1: Venta/Eliminado
+    if (strpos($tipo, 'elimin') !== false || strpos($tipo, 'anul') !== false || strpos($obs, 'eliminado por:') !== false || $estado === 0) {
+        return 'Venta/Eliminado';
+    }
+
+    // Prioridad 2: Venta/Editado
+    if (strpos($tipo, 'edit') !== false || strpos($obs, 'editado por:') !== false) {
+        return 'Venta/Editado';
+    }
+
+    // Prioridad 3: Venta
+    if (strpos($tipo, 'venta') !== false || strpos($tipo, 'orden') !== false) {
+        return 'Venta';
+    }
+
+    return null;
+}
+
+function esAccionDelUsuarioActual(array $row, int $idUsuarioActual, string $nombreUsuarioActual): bool {
+    if ((int)($row['id_usuario'] ?? 0) === $idUsuarioActual) {
+        return true;
+    }
+
+    if ($nombreUsuarioActual !== '') {
+        $obs = (string)($row['observacion_movimiento'] ?? '');
+        $actorEscapado = preg_quote($nombreUsuarioActual, '/');
+        if (preg_match('/(?:EDITADO|ELIMINADO)\s+POR\s*:\s*' . $actorEscapado . '\s*$/im', $obs)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+$id_usuario_actual = (int)($_SESSION['id_usuario'] ?? 0);
+$nombre_usuario_actual = trim((string)($_SESSION['nombre_usuario'] ?? ''));
+
+$sql = "SELECT m.fecha_hora_movimiento, m.tipo_movimiento, m.cantidad_movimiento, m.unidades_movimiento, m.observacion_movimiento, m.estado_movimiento, m.id_usuario, p.nombre_producto 
         FROM movimiento m
         INNER JOIN producto p ON m.id_producto = p.id_producto
-        WHERE m.id_usuario = ?
         ORDER BY m.fecha_hora_movimiento DESC";
 
 $stmt = $conexion->prepare($sql);
-$stmt->bind_param("i", $id_usuario_actual);
 $stmt->execute();
 $resultado = $stmt->get_result();
+
+$registrosPermitidos = [];
+if ($resultado) {
+    while ($row = $resultado->fetch_assoc()) {
+        if (!esAccionDelUsuarioActual($row, $id_usuario_actual, $nombre_usuario_actual)) {
+            continue;
+        }
+
+        $categoria = resolverCategoriaHistorial($row);
+        if ($categoria !== null) {
+            $row['tipo_mostrado'] = $categoria;
+            $registrosPermitidos[] = $row;
+        }
+    }
+}
 ?>
 
 <style>
@@ -119,6 +186,11 @@ $resultado = $stmt->get_result();
         background-color: #fcfbfe;
     }
 
+    .tabla-historial-morada > tbody > tr.fila-movimiento-anulada > td {
+        opacity: 0.65;
+        background-color: #faf9fc !important;
+    }
+
     .badge-tipo-morado {
         display: inline-block;
         background-color: #f3edfc;
@@ -151,7 +223,7 @@ $resultado = $stmt->get_result();
 
 <br>
 <h3 class="historial-titulo"><i class="fa fa-history" style="color: #673ab7; margin-right: 6px;"></i> Historial de Movimientos</h3>
-<p class="historial-subtitulo">Registro de movimientos realizados por <strong><?php echo htmlspecialchars($_SESSION['nombre_usuario']); ?></strong>.</p>
+<p class="historial-subtitulo">Registro de Ventas, Venta/Editado y Venta/Eliminado asociados a <strong><?php echo htmlspecialchars($_SESSION['nombre_usuario']); ?></strong>.</p>
 
 <div class="card-historial-morada">
     <div class="historial-toolbar">
@@ -166,27 +238,28 @@ $resultado = $stmt->get_result();
     </div>
 
     <div class="table-responsive">
-        <?php if ($resultado && $resultado->num_rows > 0) { ?>
+        <?php if (!empty($registrosPermitidos)) { ?>
             <table class="table table-bordered tabla-historial-morada" id="tablaHistorial">
                 <thead>
                     <tr>
-                        <th>ID Movimiento</th>
                         <th>Fecha y Hora</th>
                         <th>Tipo</th>
                         <th>Producto</th>
-                        <th>Monto / Cantidad</th>
+                        <th class="text-center">Unidades</th>
+                        <th>Monto</th>
                         <th>Observación</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php while ($row = $resultado->fetch_assoc()) { ?>
-                        <tr class="fila-movimiento">
-                            <td>#<?php echo (int)$row['id_movimiento']; ?></td>
+                    <?php foreach ($registrosPermitidos as $row) { ?>
+                        <?php $esEliminado = ($row['tipo_mostrado'] === 'Venta/Eliminado'); ?>
+                        <tr class="fila-movimiento <?php echo $esEliminado ? 'fila-movimiento-anulada' : ''; ?>">
                             <td><?php echo htmlspecialchars($row['fecha_hora_movimiento']); ?></td>
-                            <td><span class="badge-tipo-morado"><?php echo htmlspecialchars($row['tipo_movimiento']); ?></span></td>
+                            <td><span class="badge-tipo-morado"><?php echo htmlspecialchars($row['tipo_mostrado']); ?></span></td>
                             <td style="font-weight: 500;"><?php echo htmlspecialchars($row['nombre_producto']); ?></td>
+                            <td class="text-center"><strong><?php echo (int)($row['unidades_movimiento'] ?? 1); ?></strong></td>
                             <td style="color: #4d2c91;"><strong>$<?php echo number_format((float)$row['cantidad_movimiento'], 0, ',', '.'); ?></strong></td>
-                            <td><?php echo nl2br(htmlspecialchars($row['observacion_movimiento'])); ?></td>
+                            <td><?php echo formatearObservacionHistorial($row['observacion_movimiento']); ?></td>
                         </tr>
                     <?php } ?>
                     <tr id="sinResultadosHistorial" style="display: none;">
