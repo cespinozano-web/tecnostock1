@@ -15,6 +15,7 @@ $conexion = new mysqli($servidor, $usuario_db, $password_db, $base_datos);
 if ($conexion->connect_error) {
     die("Error de conexión: " . $conexion->connect_error);
 }
+$conexion->set_charset("utf8mb4");
 
 $sql = "SELECT p.id_producto, p.codigo_producto, p.nombre_producto, p.descripcion_producto, p.precio_producto, p.stock_actual_producto, c.nombre_categoria 
         FROM producto p
@@ -86,6 +87,7 @@ include 'visual/header.php';
 
     .tabla-orden-suave > tbody > tr.fila-orden > td {
         border-color: #ece6f7 !important;
+        vertical-align: middle;
     }
 
     .tabla-orden-suave > tbody > tr.fila-orden:hover {
@@ -110,10 +112,72 @@ include 'visual/header.php';
         text-decoration: underline;
     }
 
+    /* Botones + y - moradito leve */
+    .btn-qty-morado-leve {
+        background-color: #f3ecfc !important;
+        border-color: #d8c8f2 !important;
+        color: #5b32b0 !important;
+        font-weight: 700;
+        border-radius: 0 !important;
+        outline: none !important;
+        box-shadow: none !important;
+        transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    }
+
+    .btn-qty-morado-leve:hover:not(:disabled),
+    .btn-qty-morado-leve:focus:not(:disabled),
+    .btn-qty-morado-leve:active:not(:disabled) {
+        background-color: #e6daf9 !important;
+        border-color: #c2aee8 !important;
+        color: #43208c !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+
+    .btn-qty-morado-leve:disabled,
+    .btn-qty-morado-leve[disabled] {
+        background-color: #f7f4fc !important;
+        border-color: #e6dff5 !important;
+        color: #a998cc !important;
+        opacity: 0.75;
+    }
+
+    .input-cantidad-morado-leve {
+        border-color: #d8c8f2 !important;
+        color: #3d2770 !important;
+        font-weight: 600;
+        box-shadow: none !important;
+    }
+
+    .input-cantidad-morado-leve:focus {
+        border-color: #9e7cd9 !important;
+        box-shadow: none !important;
+    }
+
     .tabla-orden-suave > tbody > tr.fila-detalle > td {
         background-color: #fcfbfe !important;
         color: #39464e !important;
         border-color: #ece6f7 !important;
+        padding: 0 !important;
+    }
+
+    /* Caída fluida para la descripción */
+    .detalle-grid {
+        display: grid;
+        grid-template-rows: 0fr;
+        opacity: 0;
+        transition: grid-template-rows 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 0.25s ease;
+    }
+
+    .detalle-grid.abierto {
+        grid-template-rows: 1fr;
+        opacity: 1;
+    }
+
+    .detalle-inner {
+        overflow: hidden;
+        min-height: 0;
     }
 
     .collapse-content {
@@ -121,6 +185,7 @@ include 'visual/header.php';
         color: #39464e !important;
         border-left: 3px solid #b69ae8;
         padding: 10px 14px;
+        margin: 4px 0 8px 0;
     }
 
     /* Botones Confirmar (verde claro) y Cancelar (rojo claro) */
@@ -226,7 +291,12 @@ include 'visual/header.php';
                                     data-precio="<?php echo $precioUnit; ?>">
                                     <td><?php echo htmlspecialchars($row['codigo_producto']); ?></td>
                                     <td>
-                                        <a data-toggle="collapse" data-target="#detalleOrden<?php echo $idProd; ?>" aria-expanded="false" href="javascript:void(0);" onmousedown="this.blur();" style="cursor: pointer;">
+                                        <a href="javascript:void(0);"
+                                           class="toggle-detalle-orden"
+                                           data-target="detalleOrden<?php echo $idProd; ?>"
+                                           aria-expanded="false"
+                                           onmousedown="this.blur();"
+                                           style="cursor: pointer;">
                                             <?php echo htmlspecialchars($row['nombre_producto']); ?>
                                         </a>
                                     </td>
@@ -236,18 +306,18 @@ include 'visual/header.php';
                                     <td class="text-center">
                                         <div class="input-group" style="width: 130px; margin: 0 auto;">
                                             <span class="input-group-btn">
-                                                <button type="button" class="btn btn-default btn-menos" style="border-radius: 0;" <?php echo ($stockMax <= 0) ? 'disabled' : ''; ?>>-</button>
+                                                <button type="button" class="btn btn-qty-morado-leve btn-menos" onmousedown="this.blur();" <?php echo ($stockMax <= 0) ? 'disabled' : ''; ?>>-</button>
                                             </span>
                                             <input type="number"
                                                    name="cantidades[<?php echo $idProd; ?>]"
-                                                   class="form-control text-center input-cantidad"
+                                                   class="form-control text-center input-cantidad input-cantidad-morado-leve"
                                                    value="0"
                                                    min="0"
                                                    max="<?php echo $stockMax; ?>"
                                                    style="border-radius: 0; padding: 6px 4px;"
                                                    <?php echo ($stockMax <= 0) ? 'readonly' : ''; ?>>
                                             <span class="input-group-btn">
-                                                <button type="button" class="btn btn-default btn-mas" style="border-radius: 0;" <?php echo ($stockMax <= 0) ? 'disabled' : ''; ?>>+</button>
+                                                <button type="button" class="btn btn-qty-morado-leve btn-mas" onmousedown="this.blur();" <?php echo ($stockMax <= 0) ? 'disabled' : ''; ?>>+</button>
                                             </span>
                                         </div>
                                     </td>
@@ -256,11 +326,15 @@ include 'visual/header.php';
 
                                 <tr class="fila-detalle">
                                     <td colspan="7" class="collapse-td">
-                                        <div class="collapse-content collapse" id="detalleOrden<?php echo $idProd; ?>">
-                                            <span class="header-6" style="font-weight: bold; color: #53388f;">Descripción:</span>
-                                            <p style="margin-top: 5px; margin-bottom: 0;">
-                                                <?php echo !empty($row['descripcion_producto']) ? htmlspecialchars($row['descripcion_producto']) : 'Sin descripción registrada para este producto.'; ?>
-                                            </p>
+                                        <div class="detalle-grid" id="detalleOrden<?php echo $idProd; ?>">
+                                            <div class="detalle-inner">
+                                                <div class="collapse-content">
+                                                    <span class="header-6" style="font-weight: bold; color: #53388f;">Descripción:</span>
+                                                    <p style="margin-top: 5px; margin-bottom: 0;">
+                                                        <?php echo !empty($row['descripcion_producto']) ? htmlspecialchars($row['descripcion_producto']) : 'Sin descripción registrada para este producto.'; ?>
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -369,7 +443,6 @@ include 'visual/header.php';
         const hiddenNumero = document.getElementById("hidden_numero_comprador");
         const hiddenDescripcion = document.getElementById("hidden_descripcion_venta");
 
-        // Evitar modales duplicados si se entró antes por AJAX
         document.querySelectorAll("body > #modalRealizarVenta").forEach(function (previo) {
             if (previo !== modalEl) previo.remove();
         });
@@ -442,6 +515,23 @@ include 'visual/header.php';
             if (spanTotalDinero) spanTotalDinero.textContent = formatoCLP(sumaDinero);
             if (inputTotalOrden) inputTotalOrden.value = Math.round(sumaDinero);
         }
+
+        // Caída fluida de la descripción al hacer clic en el nombre del producto
+        document.addEventListener("click", function (e) {
+            const enlace = e.target.closest(".toggle-detalle-orden");
+            if (!enlace) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const idPanel = enlace.getAttribute("data-target");
+            const panel = idPanel ? document.getElementById(idPanel) : null;
+            if (!panel) return;
+
+            const estaAbierto = panel.classList.contains("abierto");
+            panel.classList.toggle("abierto", !estaAbierto);
+            enlace.setAttribute("aria-expanded", (!estaAbierto) ? "true" : "false");
+        }, true);
 
         if (inputBuscador) {
             inputBuscador.oninput = function () {

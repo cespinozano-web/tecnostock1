@@ -118,7 +118,7 @@ function formatearObservacionHTML(string $obs): string {
 
 $tablaMov = obtenerTablaExistente($conexion, ['movimiento', 'movimientos', 'orden', 'ordenes', 'venta', 'ventas']);
 $colsMov = $tablaMov ? obtenerColumnasTabla($conexion, $tablaMov) : [];
-$colPkMov = $colsMov[0] ?? 'id_movimiento';
+$colPkMov = buscarColumna($colsMov, ['id_movimiento', 'id_orden', 'id']) ?? ($colsMov[0] ?? 'id_movimiento');
 $colFecha = buscarColumna($colsMov, ['fecha_hora_movimiento', 'fecha_hora', 'fechahora', 'fecha_movimiento', 'fecha', 'created_at']);
 $colTipo = buscarColumna($colsMov, ['tipo_movimiento', 'tipo', 'accion', 'operacion']);
 $colUnidadesMov = buscarColumna($colsMov, ['unidades_movimiento', 'cantidad_unidades', 'unidades', 'cant']);
@@ -183,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $tablaMov && $colPkMov) {
             }
 
             $montoActual = $colMontoMov ? limpiarNumero($movActual[$colMontoMov] ?? 0) : 0.0;
-            if ($colUnidadesMov && isset($movActual[$colUnidadesMov]) && trim((string)$movActual[$colUnidadesMov]) !== '') {
+            if ($colUnidadesMov && array_key_exists($colUnidadesMov, $movActual) && $movActual[$colUnidadesMov] !== null && trim((string)$movActual[$colUnidadesMov]) !== '') {
                 $cantActual = max(0, (int)limpiarNumero($movActual[$colUnidadesMov]));
             } elseif ($precioUnitario > 0 && $montoActual > 0) {
                 $cantActual = max(1, (int)round($montoActual / $precioUnitario));
@@ -198,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $tablaMov && $colPkMov) {
             if ($accion === 'eliminar_movimiento') {
                 if ($estadoActual === 1 && $cantActual > 0 && $tablaProd && $colProdStock && $idProdActual > 0) {
                     $deltaStock = $esSalida ? $cantActual : -$cantActual;
-                    $conexion->query("UPDATE `$tablaProd` SET `$colProdStock` = GREATEST(0, `$colProdStock` + ($deltaStock)) WHERE `$colProdId` = $idProdActual");
+                    $conexion->query("UPDATE `$tablaProd` SET `$colProdStock` = IF(COALESCE(`$colProdStock`, 0) + ($deltaStock) < 0, 0, COALESCE(`$colProdStock`, 0) + ($deltaStock)) WHERE `$colProdId` = $idProdActual");
                 }
 
                 $sets = [];
@@ -229,7 +229,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $tablaMov && $colPkMov) {
                 }
 
                 $conexion->commit();
-                $mensajeFlash = "Movimiento anulado (estado falso). Registrado como ELIMINADO POR: {$usuarioActor}.";
+                $mensajeFlash = "Movimiento anulado ({$cantActual} ud.) y stock ajustado. Registrado como ELIMINADO POR: {$usuarioActor}.";
             } elseif ($accion === 'editar_movimiento') {
                 $nuevaCant = max(1, (int)($_POST['nueva_cantidad'] ?? 1));
                 $nuevaObsBase = trim((string)($_POST['nueva_observacion'] ?? ''));
@@ -245,12 +245,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $tablaMov && $colPkMov) {
                             $stockDisponible = (int)limpiarNumero($rowStock[$colProdStock] ?? 0);
                             $resStock->free();
                             if ($stockDisponible < $unidadesRequeridas) {
-                                throw new Exception("Stock insuficiente para aumentar en {$unidadesRequeridas} unidad(es) (disponible: {$stockDisponible}).");
+                                throw new Exception("Stock insuficiente para descontar {$unidadesRequeridas} unidad(es) (disponible: {$stockDisponible}).");
                             }
                         }
                     }
 
-                    $conexion->query("UPDATE `$tablaProd` SET `$colProdStock` = GREATEST(0, `$colProdStock` + ($deltaStock)) WHERE `$colProdId` = $idProdActual");
+                    $conexion->query("UPDATE `$tablaProd` SET `$colProdStock` = IF(COALESCE(`$colProdStock`, 0) + ($deltaStock) < 0, 0, COALESCE(`$colProdStock`, 0) + ($deltaStock)) WHERE `$colProdId` = $idProdActual");
                 }
 
                 $sets = [];
@@ -287,7 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $tablaMov && $colPkMov) {
                 }
 
                 $conexion->commit();
-                $mensajeFlash = "Movimiento actualizado. Registrado como EDITADO POR: {$usuarioActor}.";
+                $mensajeFlash = "Movimiento actualizado ({$nuevaCant} ud.). Registrado como EDITADO POR: {$usuarioActor}.";
             }
         } catch (Throwable $e) {
             $conexion->rollback();
@@ -373,7 +373,7 @@ foreach ($filasMov as $fila) {
     $pidStr = ($colProdMov && isset($fila[$colProdMov])) ? trim((string)$fila[$colProdMov]) : '';
     $precioProd = ($pidStr !== '' && isset($preciosProductosMap[$pidStr])) ? $preciosProductosMap[$pidStr] : 0.0;
 
-    if ($colUnidadesMov && isset($fila[$colUnidadesMov]) && trim((string)$fila[$colUnidadesMov]) !== '') {
+    if ($colUnidadesMov && array_key_exists($colUnidadesMov, $fila) && $fila[$colUnidadesMov] !== null && trim((string)$fila[$colUnidadesMov]) !== '') {
         $cantidadNum = max(0, (int)limpiarNumero($fila[$colUnidadesMov]));
     } elseif ($precioProd > 0 && $montoNum > 0) {
         $cantidadNum = max(1, (int)round($montoNum / $precioProd));
@@ -420,149 +420,27 @@ include 'visual/header.php';
 ?>
 
 <style>
-    .mov-header-suave {
-        color: #5a3e99;
-        font-weight: 700;
-    }
-
-    .panel-mov-suave {
-        border-color: #e6dff5 !important;
-        box-shadow: 0 2px 10px rgba(90, 62, 153, 0.05);
-    }
-
-    .panel-mov-suave > .panel-heading {
-        background-color: #faf8fe !important;
-        border-color: #e6dff5 !important;
-        color: #5a3e99;
-    }
-
-    .buscador-mov-suave .input-group-addon {
-        background-color: #f6f2fc;
-        border-color: #dfd6f2;
-        color: #6b4cb0;
-        border-radius: 0;
-    }
-
-    .buscador-mov-suave .form-control {
-        border-color: #dfd6f2;
-        border-radius: 0;
-    }
-
-    .buscador-mov-suave .form-control:focus {
-        border-color: #a487db;
-        box-shadow: none;
-    }
-
-    .tabla-mov-suave > thead > tr > th {
-        background-color: #f7f4fc;
-        color: #53388f;
-        border-color: #e6dff5 !important;
-        white-space: nowrap;
-    }
-
-    .tabla-mov-suave > tbody > tr.fila-mov > td {
-        border-color: #ece6f7 !important;
-        vertical-align: middle;
-    }
-
-    .tabla-mov-suave > tbody > tr.fila-mov:hover {
-        background-color: #fcfbfe;
-    }
-
-    .fila-mov-inactiva > td {
-        opacity: 0.65;
-        background-color: #faf9fc !important;
-    }
-
-    .badge-mov-admin {
-        background-color: #ede4fc;
-        color: #5a3e99;
-        border: 1px solid #d7c5f7;
-        font-weight: 600;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-size: 12px;
-    }
-
-    .circulo-estado-verde {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background-color: #28a745;
-        box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.18);
-        vertical-align: middle;
-    }
-
-    .circulo-estado-falso {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background-color: #dc3545;
-        box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.16);
-        vertical-align: middle;
-    }
-
-    .btn-accion-editar {
-        background-color: #f2ecfc !important;
-        border-color: #d8c8f5 !important;
-        color: #53388f !important;
-        font-weight: 600;
-        border-radius: 0;
-        outline: none !important;
-    }
-
-    .btn-accion-editar:hover,
-    .btn-accion-editar:focus {
-        background-color: #e6dcf9 !important;
-        color: #3d2573 !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-
-    .btn-accion-eliminar {
-        background-color: #fde8ea !important;
-        border-color: #f5c2c7 !important;
-        color: #842029 !important;
-        font-weight: 600;
-        border-radius: 0;
-        outline: none !important;
-    }
-
-    .btn-accion-eliminar:hover,
-    .btn-accion-eliminar:focus {
-        background-color: #fad2d6 !important;
-        color: #66161d !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-
-    .btn-cancelar-rojo-suave {
-        background-color: #fde8ea !important;
-        border-color: #f5c2c7 !important;
-        color: #842029 !important;
-        font-weight: 600;
-        border-radius: 0;
-        outline: none !important;
-    }
-
-    .btn-cancelar-rojo-suave:hover,
-    .btn-cancelar-rojo-suave:focus {
-        background-color: #fad2d6 !important;
-        border-color: #f1aeb5 !important;
-        color: #66161d !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-
-    .modal-backdrop {
-        z-index: 10050 !important;
-    }
-
-    #modalEditarMovimiento {
-        z-index: 10060 !important;
-    }
+    .mov-header-suave { color: #5a3e99; font-weight: 700; }
+    .panel-mov-suave { border-color: #e6dff5 !important; box-shadow: 0 2px 10px rgba(90, 62, 153, 0.05); }
+    .panel-mov-suave > .panel-heading { background-color: #faf8fe !important; border-color: #e6dff5 !important; color: #5a3e99; }
+    .buscador-mov-suave .input-group-addon { background-color: #f6f2fc; border-color: #dfd6f2; color: #6b4cb0; border-radius: 0; }
+    .buscador-mov-suave .form-control { border-color: #dfd6f2; border-radius: 0; }
+    .buscador-mov-suave .form-control:focus { border-color: #a487db; box-shadow: none; }
+    .tabla-mov-suave > thead > tr > th { background-color: #f7f4fc; color: #53388f; border-color: #e6dff5 !important; white-space: nowrap; }
+    .tabla-mov-suave > tbody > tr.fila-mov > td { border-color: #ece6f7 !important; vertical-align: middle; }
+    .tabla-mov-suave > tbody > tr.fila-mov:hover { background-color: #fcfbfe; }
+    .fila-mov-inactiva > td { opacity: 0.65; background-color: #faf9fc !important; }
+    .badge-mov-admin { background-color: #ede4fc; color: #5a3e99; border: 1px solid #d7c5f7; font-weight: 600; padding: 4px 10px; border-radius: 12px; font-size: 12px; }
+    .circulo-estado-verde { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #28a745; box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.18); vertical-align: middle; }
+    .circulo-estado-falso { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #dc3545; box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.16); vertical-align: middle; }
+    .btn-accion-editar { background-color: #f2ecfc !important; border-color: #d8c8f5 !important; color: #53388f !important; font-weight: 600; border-radius: 0; outline: none !important; }
+    .btn-accion-editar:hover, .btn-accion-editar:focus { background-color: #e6dcf9 !important; color: #3d2573 !important; outline: none !important; box-shadow: none !important; }
+    .btn-accion-eliminar { background-color: #fde8ea !important; border-color: #f5c2c7 !important; color: #842029 !important; font-weight: 600; border-radius: 0; outline: none !important; }
+    .btn-accion-eliminar:hover, .btn-accion-eliminar:focus { background-color: #fad2d6 !important; color: #66161d !important; outline: none !important; box-shadow: none !important; }
+    .btn-cancelar-rojo-suave { background-color: #fde8ea !important; border-color: #f5c2c7 !important; color: #842029 !important; font-weight: 600; border-radius: 0; outline: none !important; }
+    .btn-cancelar-rojo-suave:hover, .btn-cancelar-rojo-suave:focus { background-color: #fad2d6 !important; border-color: #f1aeb5 !important; color: #66161d !important; outline: none !important; box-shadow: none !important; }
+    .modal-backdrop { z-index: 10050 !important; }
+    #modalEditarMovimiento { z-index: 10060 !important; }
 </style>
 
 <br>
@@ -741,11 +619,7 @@ include 'visual/header.php';
         if (window.jQuery && typeof jQuery.fn.modal === "function") {
             const $m = jQuery(modalEl);
             $m.off("hidden.bs.modal").on("hidden.bs.modal", limpiarBackdrops);
-            $m.modal({
-                backdrop: "static",
-                keyboard: true,
-                show: true
-            });
+            $m.modal({ backdrop: "static", keyboard: true, show: true });
             setTimeout(function () {
                 modalEl.style.display = "block";
                 modalEl.classList.add("in");

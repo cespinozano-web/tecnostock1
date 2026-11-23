@@ -5,306 +5,357 @@ if (!isset($_SESSION['nombre_usuario'])) {
     exit();
 }
 
-include 'visual/header.php';
-
 $servidor = "localhost";
-$usuario_db = "root";          
-$password_db = "";              
+$usuario_db = "root";
+$password_db = "";
 $base_datos = "tecnostock1";
 
 $conexion = new mysqli($servidor, $usuario_db, $password_db, $base_datos);
-
 if ($conexion->connect_error) {
     die("Error de conexión: " . $conexion->connect_error);
 }
 $conexion->set_charset("utf8mb4");
 
-function formatearObservacionHistorial(?string $obs): string {
-    $trimObs = trim((string)($obs ?? ''));
-    if ($trimObs === '') {
-        return '<span class="text-muted">Sin observación</span>';
+function obtenerTabla(mysqli $db, array $candidatas): ?string {
+    foreach ($candidatas as $t) {
+        $res = $db->query("SHOW TABLES LIKE '" . $db->real_escape_string($t) . "'");
+        if ($res && $res->num_rows > 0) {
+            $res->free();
+            return $t;
+        }
     }
-    $normalizado = preg_replace('/<br\s*\/?>/i', "\n", $trimObs);
-    $lineas = preg_split('/\r?\n/', (string)$normalizado);
-    $escapadas = array_map(function ($linea) {
-        return htmlspecialchars($linea, ENT_QUOTES, 'UTF-8');
-    }, $lineas);
-    return implode('<br>', $escapadas);
-}
-
-function resolverCategoriaHistorial(array $row): ?string {
-    $tipo = strtolower(trim((string)($row['tipo_movimiento'] ?? '')));
-    $obs = strtolower((string)($row['observacion_movimiento'] ?? ''));
-    $estado = (int)($row['estado_movimiento'] ?? 1);
-
-    // Prioridad 1: Venta/Eliminado
-    if (strpos($tipo, 'elimin') !== false || strpos($tipo, 'anul') !== false || strpos($obs, 'eliminado por:') !== false || $estado === 0) {
-        return 'Venta/Eliminado';
-    }
-
-    // Prioridad 2: Venta/Editado
-    if (strpos($tipo, 'edit') !== false || strpos($obs, 'editado por:') !== false) {
-        return 'Venta/Editado';
-    }
-
-    // Prioridad 3: Venta
-    if (strpos($tipo, 'venta') !== false || strpos($tipo, 'orden') !== false) {
-        return 'Venta';
-    }
-
     return null;
 }
 
-function esAccionDelUsuarioActual(array $row, int $idUsuarioActual, string $nombreUsuarioActual): bool {
-    if ((int)($row['id_usuario'] ?? 0) === $idUsuarioActual) {
-        return true;
-    }
-
-    if ($nombreUsuarioActual !== '') {
-        $obs = (string)($row['observacion_movimiento'] ?? '');
-        $actorEscapado = preg_quote($nombreUsuarioActual, '/');
-        if (preg_match('/(?:EDITADO|ELIMINADO)\s+POR\s*:\s*' . $actorEscapado . '\s*$/im', $obs)) {
-            return true;
+function obtenerCols(mysqli $db, string $tabla): array {
+    $cols = [];
+    $res = $db->query("SHOW COLUMNS FROM `$tabla`");
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $cols[] = $r['Field'];
         }
+        $res->free();
     }
-
-    return false;
+    return $cols;
 }
 
-$id_usuario_actual = (int)($_SESSION['id_usuario'] ?? 0);
-$nombre_usuario_actual = trim((string)($_SESSION['nombre_usuario'] ?? ''));
-
-$sql = "SELECT m.fecha_hora_movimiento, m.tipo_movimiento, m.cantidad_movimiento, m.unidades_movimiento, m.observacion_movimiento, m.estado_movimiento, m.id_usuario, p.nombre_producto 
-        FROM movimiento m
-        INNER JOIN producto p ON m.id_producto = p.id_producto
-        ORDER BY m.fecha_hora_movimiento DESC";
-
-$stmt = $conexion->prepare($sql);
-$stmt->execute();
-$resultado = $stmt->get_result();
-
-$registrosPermitidos = [];
-if ($resultado) {
-    while ($row = $resultado->fetch_assoc()) {
-        if (!esAccionDelUsuarioActual($row, $id_usuario_actual, $nombre_usuario_actual)) {
-            continue;
+function buscarC(array $cols, array $patrones): ?string {
+    foreach ($patrones as $p) {
+        foreach ($cols as $c) {
+            if (strcasecmp($c, $p) === 0) return $c;
         }
+    }
+    foreach ($patrones as $p) {
+        foreach ($cols as $c) {
+            if (stripos($c, $p) !== false) return $c;
+        }
+    }
+    return null;
+}
 
-        $categoria = resolverCategoriaHistorial($row);
-        if ($categoria !== null) {
-            $row['tipo_mostrado'] = $categoria;
-            $registrosPermitidos[] = $row;
+function limpiarNumHist($val): float {
+    if (is_int($val) || is_float($val)) return (float)$val;
+    if (!is_string($val)) return 0.0;
+    $s = preg_replace('/[^0-9,.-]/', '', trim($val));
+    if ($s === '') return 0.0;
+    if (preg_match('/^\-?\d{1,3}(\.\d{3})+$/', $s)) {
+        $s = str_replace('.', '', $s);
+    } elseif (substr_count($s, '.') > 0 && substr_count($s, ',') > 0) {
+        $s = str_replace('.', '', $s);
+        $s = str_replace(',', '.', $s);
+    } elseif (preg_match('/^\-?\d+,\d{1,2}$/', $s)) {
+        $s = str_replace(',', '.', $s);
+    }
+    return is_numeric($s) ? (float)$s : 0.0;
+}
+
+function resolverUsuarioHist(string $valorRaw, array $usuariosPorId, array $usuariosPorNombre): string {
+    $v = trim($valorRaw);
+    if ($v === '') {
+        return 'Sistema';
+    }
+    if (isset($usuariosPorId[$v])) {
+        return $usuariosPorId[$v];
+    }
+    $lower = strtolower($v);
+    if (isset($usuariosPorNombre[$lower])) {
+        return $usuariosPorNombre[$lower];
+    }
+    return $v;
+}
+
+$tablaMov = obtenerTabla($conexion, ['movimiento', 'movimientos']);
+$colsMov = $tablaMov ? obtenerCols($conexion, $tablaMov) : [];
+$colPk = buscarC($colsMov, ['id_movimiento', 'id']) ?? ($colsMov[0] ?? 'id_movimiento');
+$colFec = buscarC($colsMov, ['fecha_hora_movimiento', 'fecha_hora', 'fecha']);
+$colTip = buscarC($colsMov, ['tipo_movimiento', 'tipo']);
+$colUni = buscarC($colsMov, ['unidades_movimiento', 'unidades']);
+$colMon = buscarC($colsMov, ['cantidad_movimiento', 'monto_movimiento', 'monto']);
+$colObs = buscarC($colsMov, ['observacion_movimiento', 'observacion', 'observaciones']);
+$colPrd = buscarC($colsMov, ['id_producto', 'producto']);
+$colUsr = buscarC($colsMov, ['nombre_usuario', 'usuario', 'id_usuario']);
+$colEst = buscarC($colsMov, ['estado_movimiento', 'estado']);
+
+$usuariosPorId = [];
+$usuariosPorNombre = [];
+$tablaUsr = obtenerTabla($conexion, ['usuario', 'usuarios']);
+if ($tablaUsr) {
+    $colsU = obtenerCols($conexion, $tablaUsr);
+    $cUid = buscarC($colsU, ['id_usuario', 'id']);
+    $cUnom = buscarC($colsU, ['nombre_usuario', 'nombre']);
+    if ($cUid && $cUnom) {
+        $rU = $conexion->query("SELECT `$cUid`, `$cUnom` FROM `$tablaUsr`");
+        if ($rU) {
+            while ($u = $rU->fetch_assoc()) {
+                $uidStr = trim((string)$u[$cUid]);
+                $unomStr = trim((string)$u[$cUnom]);
+                if ($unomStr !== '') {
+                    if ($uidStr !== '') {
+                        $usuariosPorId[$uidStr] = $unomStr;
+                    }
+                    $usuariosPorNombre[strtolower($unomStr)] = $unomStr;
+                }
+            }
+            $rU->free();
         }
     }
 }
+
+$nombreUsuarioSesion = trim((string)($_SESSION['nombre_usuario'] ?? ''));
+$idUsuarioSesion = isset($_SESSION['id_usuario']) ? trim((string)$_SESSION['id_usuario']) : '';
+if ($idUsuarioSesion === '' && $nombreUsuarioSesion !== '') {
+    $foundId = array_search(strtolower($nombreUsuarioSesion), array_map('strtolower', $usuariosPorId), true);
+    if ($foundId !== false) {
+        $idUsuarioSesion = (string)$foundId;
+    }
+}
+
+$productosMap = [];
+$preciosMap = [];
+$tablaPrd = obtenerTabla($conexion, ['producto', 'productos']);
+if ($tablaPrd) {
+    $colsP = obtenerCols($conexion, $tablaPrd);
+    $cPid = buscarC($colsP, ['id_producto', 'id']);
+    $cPnom = buscarC($colsP, ['nombre_producto', 'nombre']);
+    $cPpre = buscarC($colsP, ['precio_producto', 'precio']);
+    if ($cPid && $cPnom) {
+        $selP = "`$cPid`, `$cPnom`" . ($cPpre ? ", `$cPpre`" : "");
+        $rP = $conexion->query("SELECT $selP FROM `$tablaPrd`");
+        if ($rP) {
+            while ($p = $rP->fetch_assoc()) {
+                $k = trim((string)$p[$cPid]);
+                $productosMap[$k] = (string)$p[$cPnom];
+                if ($cPpre && isset($p[$cPpre])) {
+                    $preciosMap[$k] = limpiarNumHist($p[$cPpre]);
+                }
+            }
+            $rP->free();
+        }
+    }
+}
+
+$filasHist = [];
+if ($tablaMov && $colPk) {
+    $rM = $conexion->query("SELECT * FROM `$tablaMov` ORDER BY `$colPk` DESC");
+    if ($rM) {
+        while ($row = $rM->fetch_assoc()) {
+            $tipoBase = $colTip ? trim((string)($row[$colTip] ?? 'Venta')) : 'Venta';
+            $obsRaw = $colObs ? trim((string)($row[$colObs] ?? '')) : '';
+
+            $activo = true;
+            if ($colEst && isset($row[$colEst])) {
+                $vE = $row[$colEst];
+                if (is_string($vE) && in_array(strtolower(trim($vE)), ['0', 'false', 'inactivo', 'anulado', 'eliminado', 'no'], true)) {
+                    $activo = false;
+                } else {
+                    $activo = ((int)$vE !== 0);
+                }
+            }
+
+            $esEliminado = (!$activo) || (stripos($obsRaw, 'ELIMINADO POR') !== false);
+            $esEditado = (!$esEliminado) && (stripos($obsRaw, 'EDITADO POR') !== false);
+            $esIngreso = (strcasecmp($tipoBase, 'Ingreso') === 0 || stripos($tipoBase, 'ingreso') !== false);
+
+            $baseEtiqueta = $esIngreso ? 'Ingreso' : 'Venta';
+            $usrColVal = $colUsr ? trim((string)($row[$colUsr] ?? '')) : '';
+
+            if ($esEliminado) {
+                $categoriaHist = $baseEtiqueta . '/Eliminado';
+                if (preg_match('/ELIMINADO\s+POR\s*:\s*([^\r\n<]+)/i', $obsRaw, $mDel)) {
+                    $actor = resolverUsuarioHist($mDel[1], $usuariosPorId, $usuariosPorNombre);
+                } else {
+                    $actor = resolverUsuarioHist($usrColVal, $usuariosPorId, $usuariosPorNombre);
+                }
+            } elseif ($esEditado) {
+                $categoriaHist = $baseEtiqueta . '/Editado';
+                if (preg_match('/EDITADO\s+POR\s*:\s*([^\r\n<]+)/i', $obsRaw, $mEd)) {
+                    $actor = resolverUsuarioHist($mEd[1], $usuariosPorId, $usuariosPorNombre);
+                } else {
+                    $actor = resolverUsuarioHist($usrColVal, $usuariosPorId, $usuariosPorNombre);
+                }
+            } else {
+                $categoriaHist = $baseEtiqueta;
+                $actor = resolverUsuarioHist($usrColVal, $usuariosPorId, $usuariosPorNombre);
+            }
+
+            // Filtrar estrictamente: solo mostrar movimientos del usuario actual
+            $esUsuarioActual = (strcasecmp($actor, $nombreUsuarioSesion) === 0);
+            if (!$esUsuarioActual && $idUsuarioSesion !== '' && $usrColVal === $idUsuarioSesion && !$esEliminado && !$esEditado) {
+                $esUsuarioActual = true;
+            }
+            if (!$esUsuarioActual) {
+                continue;
+            }
+
+            $pid = ($colPrd && isset($row[$colPrd])) ? trim((string)$row[$colPrd]) : '';
+            $prodNombre = ($pid !== '' && isset($productosMap[$pid])) ? $productosMap[$pid] : ($pid !== '' ? $pid : '-');
+            $precioU = ($pid !== '' && isset($preciosMap[$pid])) ? $preciosMap[$pid] : 0.0;
+            $monto = ($colMon && isset($row[$colMon])) ? limpiarNumHist($row[$colMon]) : 0.0;
+
+            if ($colUni && isset($row[$colUni]) && trim((string)$row[$colUni]) !== '') {
+                $unidades = max(0, (int)limpiarNumHist($row[$colUni]));
+            } elseif ($precioU > 0 && $monto > 0) {
+                $unidades = max(1, (int)round($monto / $precioU));
+            } else {
+                $unidades = 1;
+            }
+
+            if ($monto <= 0 && $precioU > 0 && $unidades > 0) {
+                $monto = $precioU * $unidades;
+            }
+
+            $filasHist[] = [
+                'fecha' => ($colFec && trim((string)($row[$colFec] ?? '')) !== '') ? trim((string)$row[$colFec]) : '-',
+                'categoria' => $categoriaHist,
+                'producto' => $prodNombre,
+                'unidades' => $unidades,
+                'monto' => '$' . number_format($monto, 0, ',', '.'),
+                'actor' => $actor,
+            ];
+        }
+        $rM->free();
+    }
+}
+
+include 'visual/header.php';
 ?>
 
 <style>
-    .historial-titulo {
-        color: #1f1b2e;
-        font-weight: 700;
-        margin: 0 0 4px 0;
-    }
-
-    .historial-subtitulo {
-        color: #6f6785;
-        font-size: 13.5px;
-        margin: 0 0 18px 0;
-    }
-
-    .card-historial-morada {
-        background-color: #ffffff;
-        border: 1px solid #e7e1f5;
-        border-radius: 10px;
-        overflow: hidden;
-        box-shadow: 0 2px 8px rgba(92, 61, 166, 0.04);
-        margin-bottom: 18px;
-    }
-
-    .historial-toolbar {
-        background-color: #faf8fe;
-        border-bottom: 1px solid #ece6f7;
-        padding: 14px 18px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 12px;
-    }
-
-    .historial-badge-usuario {
-        background-color: #f1ebfc;
-        color: #5e35b1;
-        border: 1px solid #dfd3f7;
-        font-size: 12.5px;
-        font-weight: 600;
-        padding: 5px 12px;
-        border-radius: 20px;
-    }
-
-    .buscador-historial .input-group-addon {
-        background-color: #f5f1fc;
-        border-color: #dfd7f0;
-        color: #673ab7;
-        border-radius: 7px 0 0 7px;
-    }
-
-    .buscador-historial .form-control {
-        border-color: #dfd7f0;
-        border-radius: 0 7px 7px 0;
-        height: 36px;
-        box-shadow: none;
-    }
-
-    .buscador-historial .form-control:focus {
-        border-color: #7c52cc;
-        box-shadow: 0 0 0 3px rgba(124, 82, 204, 0.12);
-    }
-
-    .tabla-historial-morada {
-        margin-bottom: 0 !important;
-    }
-
-    .tabla-historial-morada > thead > tr > th {
-        background-color: #f5f1fc;
-        color: #4d2c91;
-        border-bottom: 2px solid #dfd5f5 !important;
-        border-top: none !important;
-        border-color: #ece6f7;
-        font-weight: 600;
-        padding: 12px 14px;
-    }
-
-    .tabla-historial-morada > tbody > tr > td {
-        border-color: #efeaf9 !important;
-        padding: 11px 14px;
-        vertical-align: middle;
-        color: #2b253b;
-    }
-
-    .tabla-historial-morada > tbody > tr.fila-movimiento:hover {
-        background-color: #fcfbfe;
-    }
-
-    .tabla-historial-morada > tbody > tr.fila-movimiento-anulada > td {
-        opacity: 0.65;
-        background-color: #faf9fc !important;
-    }
-
-    .badge-tipo-morado {
-        display: inline-block;
-        background-color: #f3edfc;
-        color: #5a32a8;
-        border: 1px solid #dfd2f5;
-        font-size: 12px;
-        font-weight: 600;
-        padding: 3px 10px;
-        border-radius: 20px;
-    }
-
-    .btn-volver-morado-suave {
-        background-color: #ffffff;
-        border: 1px solid #dcd4ec;
-        color: #3d3552 !important;
-        border-radius: 7px;
-        padding: 8px 16px;
-        font-weight: 600;
-        outline: none !important;
-    }
-
-    .btn-volver-morado-suave:hover,
-    .btn-volver-morado-suave:focus {
-        background-color: #f7f4fc !important;
-        border-color: #c8bce3 !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
+    .hist-titulo { color: #1f1b2e; font-weight: 700; margin: 0 0 4px 0; }
+    .hist-sub { color: #6f6785; font-size: 13.5px; margin: 0 0 18px 0; }
+    .card-hist { background: #fff; border: 1px solid #e7e1f5; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 61, 166, 0.04); }
+    .toolbar-hist { background: #faf8fe; border-bottom: 1px solid #ece6f7; padding: 13px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .tabla-hist > thead > tr > th { background: #f5f1fc; color: #4d2c91; border-bottom: 2px solid #dfd5f5 !important; border-top: none !important; }
+    .tabla-hist > tbody > tr > td { border-color: #efeaf9 !important; vertical-align: middle; }
+    .badge-ingreso { background: #e8f7ee; color: #1e6038; border: 1px solid #b7e4c7; padding: 4px 10px; border-radius: 12px; font-weight: 600; }
+    .badge-venta { background: #ede4fc; color: #5a3e99; border: 1px solid #d7c5f7; padding: 4px 10px; border-radius: 12px; font-weight: 600; }
+    .badge-editado { background: #fff6e0; color: #7a5800; border: 1px solid #f2dc9b; padding: 4px 10px; border-radius: 12px; font-weight: 600; }
+    .badge-eliminado { background: #fde8ea; color: #842029; border: 1px solid #f5c2c7; padding: 4px 10px; border-radius: 12px; font-weight: 600; }
 </style>
 
 <br>
-<h3 class="historial-titulo"><i class="fa fa-history" style="color: #673ab7; margin-right: 6px;"></i> Historial de Movimientos</h3>
-<p class="historial-subtitulo">Registro de Ventas, Venta/Editado y Venta/Eliminado asociados a <strong><?php echo htmlspecialchars($_SESSION['nombre_usuario']); ?></strong>.</p>
+<h3 class="hist-titulo"><i class="fa fa-history" style="color: #673ab7; margin-right: 6px;"></i> Historial de Movimientos</h3>
+<p class="hist-sub">Registro categorizado de tus Ingresos, Ventas, Ediciones y Eliminaciones (<strong><?php echo htmlspecialchars($nombreUsuarioSesion); ?></strong>).</p>
 
-<div class="card-historial-morada">
-    <div class="historial-toolbar">
-        <span class="historial-badge-usuario">
-            <i class="fa fa-user-o" style="margin-right: 5px;"></i> Usuario: <?php echo htmlspecialchars($_SESSION['nombre_usuario']); ?>
-        </span>
-
-        <div class="input-group buscador-historial" style="width: 280px; max-width: 100%;">
-            <span class="input-group-addon"><i class="fa fa-search"></i></span>
-            <input type="text" id="buscadorHistorial" class="form-control" placeholder="Buscar producto, tipo o nota..." autocomplete="off">
+<div class="card-hist">
+    <div class="toolbar-hist">
+        <div class="btn-group" id="filtrosCategoriaHist">
+            <button type="button" class="btn btn-xs btn-default active js-filtro-cat" data-cat="">Todos</button>
+            <button type="button" class="btn btn-xs btn-default js-filtro-cat" data-cat="Ingreso">Ingreso</button>
+            <button type="button" class="btn btn-xs btn-default js-filtro-cat" data-cat="Ingreso/Editado">Ingreso/Editado</button>
+            <button type="button" class="btn btn-xs btn-default js-filtro-cat" data-cat="Ingreso/Eliminado">Ingreso/Eliminado</button>
+            <button type="button" class="btn btn-xs btn-default js-filtro-cat" data-cat="Venta">Venta</button>
+            <button type="button" class="btn btn-xs btn-default js-filtro-cat" data-cat="Venta/Editado">Venta/Editado</button>
+            <button type="button" class="btn btn-xs btn-default js-filtro-cat" data-cat="Venta/Eliminado">Venta/Eliminado</button>
         </div>
+
+        <input type="text" id="buscadorHistorial" class="form-control" style="width: 260px; max-width: 100%; border-radius: 7px;" placeholder="Buscar producto o tipo..." autocomplete="off">
     </div>
 
     <div class="table-responsive">
-        <?php if (!empty($registrosPermitidos)) { ?>
-            <table class="table table-bordered tabla-historial-morada" id="tablaHistorial">
-                <thead>
-                    <tr>
-                        <th>Fecha y Hora</th>
-                        <th>Tipo</th>
-                        <th>Producto</th>
-                        <th class="text-center">Unidades</th>
-                        <th>Monto</th>
-                        <th>Observación</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($registrosPermitidos as $row) { ?>
-                        <?php $esEliminado = ($row['tipo_mostrado'] === 'Venta/Eliminado'); ?>
-                        <tr class="fila-movimiento <?php echo $esEliminado ? 'fila-movimiento-anulada' : ''; ?>">
-                            <td><?php echo htmlspecialchars($row['fecha_hora_movimiento']); ?></td>
-                            <td><span class="badge-tipo-morado"><?php echo htmlspecialchars($row['tipo_mostrado']); ?></span></td>
-                            <td style="font-weight: 500;"><?php echo htmlspecialchars($row['nombre_producto']); ?></td>
-                            <td class="text-center"><strong><?php echo (int)($row['unidades_movimiento'] ?? 1); ?></strong></td>
-                            <td style="color: #4d2c91;"><strong>$<?php echo number_format((float)$row['cantidad_movimiento'], 0, ',', '.'); ?></strong></td>
-                            <td><?php echo formatearObservacionHistorial($row['observacion_movimiento']); ?></td>
+        <table class="table table-bordered tabla-hist" id="tablaHistorial" style="margin-bottom: 0;">
+            <thead>
+                <tr>
+                    <th>Fecha y hora</th>
+                    <th>Tipo</th>
+                    <th>Producto</th>
+                    <th class="text-center">Cantidad</th>
+                    <th>Monto</th>
+                    <th>Usuario</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (!empty($filasHist)): ?>
+                    <?php foreach ($filasHist as $fh): ?>
+                        <?php
+                        $cat = $fh['categoria'];
+                        if ($cat === 'Ingreso') {
+                            $badgeClass = 'badge-ingreso';
+                        } elseif (strpos($cat, 'Eliminado') !== false) {
+                            $badgeClass = 'badge-eliminado';
+                        } elseif (strpos($cat, 'Editado') !== false) {
+                            $badgeClass = 'badge-editado';
+                        } else {
+                            $badgeClass = 'badge-venta';
+                        }
+                        ?>
+                        <tr class="fila-hist" data-cat="<?php echo htmlspecialchars($cat, ENT_QUOTES, 'UTF-8'); ?>">
+                            <td><?php echo htmlspecialchars($fh['fecha']); ?></td>
+                            <td><span class="<?php echo $badgeClass; ?>"><?php echo htmlspecialchars($cat); ?></span></td>
+                            <td><?php echo htmlspecialchars($fh['producto']); ?></td>
+                            <td class="text-center"><strong><?php echo (int)$fh['unidades']; ?></strong></td>
+                            <td><strong><?php echo htmlspecialchars($fh['monto']); ?></strong></td>
+                            <td><?php echo htmlspecialchars($fh['actor']); ?></td>
                         </tr>
-                    <?php } ?>
-                    <tr id="sinResultadosHistorial" style="display: none;">
-                        <td colspan="6" class="text-center text-muted">No se encontraron movimientos que coincidan con la búsqueda.</td>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="6" class="text-center text-muted" style="padding: 20px;">No tienes movimientos registrados en el historial.</td>
                     </tr>
-                </tbody>
-            </table>
-        <?php } else { ?>
-            <div style="padding: 20px; text-align: center; color: #6f6785;">
-                No tienes movimientos registrados en el sistema.
-            </div>
-        <?php } ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
     </div>
 </div>
 
-<a href="inicio.php" class="btn btn-volver-morado-suave"><i class="fa fa-arrow-left"></i> Volver al Inicio</a>
-
 <script>
-document.addEventListener("DOMContentLoaded", function () {
-    const inputBuscador = document.getElementById("buscadorHistorial");
-    const filas = document.querySelectorAll("#tablaHistorial tbody tr.fila-movimiento");
-    const filaVacia = document.getElementById("sinResultadosHistorial");
+(function iniciarHistorial() {
+    if (window.__tecnostockHistorialInit) return;
+    window.__tecnostockHistorialInit = true;
 
-    if (!inputBuscador) return;
+    let catActiva = "";
 
-    inputBuscador.addEventListener("input", function () {
-        const termino = this.value.toLowerCase().trim();
-        let visibles = 0;
+    function aplicarFiltros() {
+        const buscador = document.getElementById("buscadorHistorial");
+        const filas = document.querySelectorAll("#tablaHistorial tbody tr.fila-hist");
+        const q = buscador ? buscador.value.toLowerCase().trim() : "";
 
         filas.forEach(function (fila) {
-            const coincide = fila.textContent.toLowerCase().includes(termino);
-            fila.style.display = coincide ? "" : "none";
-            if (coincide) visibles++;
+            const filaCat = fila.getAttribute("data-cat") || "";
+            const coincideCat = (catActiva === "" || filaCat === catActiva);
+            const coincideTexto = (q === "" || fila.textContent.toLowerCase().includes(q));
+            fila.style.display = (coincideCat && coincideTexto) ? "" : "none";
         });
+    }
 
-        if (filaVacia) {
-            filaVacia.style.display = (visibles === 0 && filas.length > 0) ? "" : "none";
+    document.addEventListener("click", function (e) {
+        const btn = e.target.closest ? e.target.closest(".js-filtro-cat") : null;
+        if (!btn) return;
+        document.querySelectorAll(".js-filtro-cat").forEach(function (b) { b.classList.remove("active"); });
+        btn.classList.add("active");
+        catActiva = btn.getAttribute("data-cat") || "";
+        aplicarFiltros();
+    });
+
+    document.addEventListener("input", function (e) {
+        if (e.target && e.target.id === "buscadorHistorial") {
+            aplicarFiltros();
         }
     });
-});
+})();
 </script>
 
 <?php
-$stmt->close();
 $conexion->close();
-
 include 'visual/footer.php';
 ?>

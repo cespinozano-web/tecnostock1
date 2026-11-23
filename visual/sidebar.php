@@ -1,7 +1,84 @@
 <?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $pagina_actual = basename($_SERVER['PHP_SELF']);
 $es_perfil = ($pagina_actual == 'misDatos.php');
-$mostrar_admin = function_exists('esAdmin') ? esAdmin() : in_array(strtolower(trim((string)($_SESSION['nombre_cargo'] ?? ''))), ['admin', 'administrador', 'owner'], true);
+$es_gestion_usuarios = in_array($pagina_actual, ['gestion_usuarios.php', 'nuevo_usuario.php'], true);
+$es_notificaciones = ($pagina_actual == 'notificaciones.php');
+
+$cargoSidebar = strtolower(trim((string)($_SESSION['nombre_cargo'] ?? '')));
+$mostrar_admin = function_exists('esAdmin')
+    ? esAdmin()
+    : in_array($cargoSidebar, ['dueño', 'dueno', 'admin', 'administrador', 'owner'], true);
+
+$totalStockCriticoSidebar = isset($totalNotificaciones) ? (int)$totalNotificaciones : 0;
+
+if ($mostrar_admin && !isset($totalNotificaciones)) {
+    $dbSidebar = @new mysqli("localhost", "root", "", "tecnostock1");
+    if ($dbSidebar && !$dbSidebar->connect_errno) {
+        $dbSidebar->set_charset("utf8mb4");
+
+        $colsProdSb = [];
+        $resColsSb = @$dbSidebar->query("SHOW COLUMNS FROM `producto`");
+        if ($resColsSb) {
+            while ($cRow = $resColsSb->fetch_assoc()) {
+                $colsProdSb[] = $cRow['Field'];
+            }
+            $resColsSb->free();
+        }
+
+        $colStockSb = null;
+        foreach (['stock_actual', 'stock', 'cantidad_stock', 'cantidad', 'existencia'] as $cand) {
+            foreach ($colsProdSb as $col) {
+                if (strcasecmp($col, $cand) === 0 || stripos($col, $cand) !== false) {
+                    $colStockSb = $col;
+                    break 2;
+                }
+            }
+        }
+
+        $colCriticoSb = null;
+        foreach (['stock_critico', 'stock_minimo', 'minimo_stock', 'critico', 'minimo'] as $cand) {
+            foreach ($colsProdSb as $col) {
+                if (strcasecmp($col, $cand) === 0 || stripos($col, $cand) !== false) {
+                    $colCriticoSb = $col;
+                    break 2;
+                }
+            }
+        }
+
+        $colEstadoSb = null;
+        foreach (['estado_producto', 'estado', 'activo'] as $cand) {
+            foreach ($colsProdSb as $col) {
+                if (strcasecmp($col, $cand) === 0 || stripos($col, $cand) !== false) {
+                    $colEstadoSb = $col;
+                    break 2;
+                }
+            }
+        }
+
+        if ($colStockSb) {
+            $exprStock = "COALESCE(`$colStockSb`, 0)";
+            $exprCrit = $colCriticoSb ? "COALESCE(`$colCriticoSb`, 5)" : "5";
+            $whereSb = ["{$exprStock} <= ({$exprCrit})"];
+
+            if ($colEstadoSb) {
+                $whereSb[] = "(`$colEstadoSb` IS NULL OR `$colEstadoSb` != 0)";
+            }
+
+            $sqlCountSb = "SELECT COUNT(*) AS total_criticos FROM `producto` WHERE " . implode(" AND ", $whereSb);
+            $resCntSb = @$dbSidebar->query($sqlCountSb);
+            if ($resCntSb && ($rowCntSb = $resCntSb->fetch_assoc())) {
+                $totalStockCriticoSidebar = (int)($rowCntSb['total_criticos'] ?? 0);
+                $resCntSb->free();
+            }
+        }
+
+        $dbSidebar->close();
+    }
+}
 ?>
 
 <style>
@@ -83,6 +160,18 @@ $mostrar_admin = function_exists('esAdmin') ? esAdmin() : in_array(strtolower(tr
         width: 18px;
         text-align: center;
         margin-right: 10px;
+    }
+
+    .msb .badge-notif-critico {
+        float: right;
+        background-color: #dc3545;
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 12px;
+        line-height: 1.2;
+        margin-top: 1px;
     }
 
     .msb .panel.panel-default {
@@ -217,7 +306,7 @@ $mostrar_admin = function_exists('esAdmin') ? esAdmin() : in_array(strtolower(tr
                 <li class="<?php echo ($pagina_actual == 'historial.php') ? 'active' : ''; ?>">
                     <a href="historial.php" onmousedown="this.blur();"><i class="fa fa-history"></i> Historial</a>
                 </li>
-                
+
                 <li class="<?php echo ($pagina_actual == 'bodega.php') ? 'active' : ''; ?>">
                     <a href="bodega.php" onmousedown="this.blur();"><i class="fa fa-cubes"></i> Bodega</a>
                 </li>
@@ -225,6 +314,15 @@ $mostrar_admin = function_exists('esAdmin') ? esAdmin() : in_array(strtolower(tr
                 <?php if ($mostrar_admin): ?>
                     <li class="<?php echo ($pagina_actual == 'movimientos.php') ? 'active' : ''; ?>">
                         <a href="movimientos.php" onmousedown="this.blur();"><i class="fa fa-exchange"></i> Movimientos</a>
+                    </li>
+                    <li class="<?php echo $es_gestion_usuarios ? 'active' : ''; ?>">
+                        <a href="gestion_usuarios.php" onmousedown="this.blur();"><i class="fa fa-users"></i> Gestión de usuarios</a>
+                    </li>
+                    <li class="<?php echo $es_notificaciones ? 'active' : ''; ?>">
+                        <a href="notificaciones.php" onmousedown="this.blur();">
+                            <i class="fa fa-bell"></i> Notificaciones
+                            <span class="badge-notif-critico" id="badgeNotificacionesCriticas"><?php echo (int)$totalStockCriticoSidebar; ?></span>
+                        </a>
                     </li>
                 <?php endif; ?>
 
@@ -249,7 +347,7 @@ $mostrar_admin = function_exists('esAdmin') ? esAdmin() : in_array(strtolower(tr
 
             </ul>
         </div>
-    </nav>   
+    </nav>
 </div>
 
 <div class="modal fade" id="modalCerrarSesion" tabindex="-1" role="dialog" aria-labelledby="modalCerrarSesionLabel" aria-hidden="true">

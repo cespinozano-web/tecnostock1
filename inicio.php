@@ -15,6 +15,7 @@ $conexion = new mysqli($servidor, $usuario_db, $password_db, $base_datos);
 if ($conexion->connect_error) {
     die("Error de conexión: " . $conexion->connect_error);
 }
+$conexion->set_charset("utf8mb4");
 
 $sql = "SELECT p.id_producto, p.codigo_producto, p.nombre_producto, p.descripcion_producto, p.precio_producto, p.stock_actual_producto, c.nombre_categoria 
         FROM producto p
@@ -124,6 +125,25 @@ include 'visual/header.php';
         border-top: none !important;
     }
 
+    /* Caída suave con grid-template-rows */
+    .detalle-grid {
+        display: grid;
+        grid-template-rows: 0fr;
+        opacity: 0;
+        transition: grid-template-rows 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 0.25s ease;
+    }
+
+    .detalle-grid.abierto {
+        grid-template-rows: 1fr;
+        opacity: 1;
+    }
+
+    .detalle-inner {
+        overflow: hidden;
+        min-height: 0;
+    }
+
     .collapse-content {
         background-color: #fbf9fe !important;
         color: #39464e !important;
@@ -184,7 +204,12 @@ include 'visual/header.php';
                     <tr class="fila-producto">
                         <td><?php echo htmlspecialchars($row['codigo_producto']); ?></td>
                         <td>
-                            <a data-toggle="collapse" data-target="#detalle<?php echo $row['id_producto']; ?>" aria-expanded="false" href="javascript:void(0);" onmousedown="this.blur();" style="cursor: pointer;">
+                            <a href="javascript:void(0);"
+                               class="toggle-detalle-producto"
+                               data-target="detalle<?php echo (int)$row['id_producto']; ?>"
+                               aria-expanded="false"
+                               onmousedown="this.blur();"
+                               style="cursor: pointer;">
                                 <?php echo htmlspecialchars($row['nombre_producto']); ?>
                             </a>
                         </td>
@@ -195,12 +220,14 @@ include 'visual/header.php';
                     
                     <tr class="fila-detalle">
                         <td colspan="5">
-                            <div class="collapse" id="detalle<?php echo $row['id_producto']; ?>">
-                                <div class="collapse-content">
-                                    <span style="font-weight: bold; color: #4a2794;">Descripción:</span>
-                                    <p style="margin-top: 5px; margin-bottom: 0; color: #39464e;">
-                                        <?php echo !empty($row['descripcion_producto']) ? htmlspecialchars($row['descripcion_producto']) : 'Sin descripción registrada para este producto.'; ?>
-                                    </p>
+                            <div class="detalle-grid" id="detalle<?php echo (int)$row['id_producto']; ?>">
+                                <div class="detalle-inner">
+                                    <div class="collapse-content">
+                                        <span style="font-weight: bold; color: #4a2794;">Descripción:</span>
+                                        <p style="margin-top: 5px; margin-bottom: 0; color: #39464e;">
+                                            <?php echo !empty($row['descripcion_producto']) ? htmlspecialchars($row['descripcion_producto']) : 'Sin descripción registrada para este producto.'; ?>
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         </td>
@@ -223,6 +250,22 @@ document.addEventListener("DOMContentLoaded", function () {
     const inputBuscador = document.getElementById("buscadorProductos");
     const filasProducto = document.querySelectorAll("#tablaProductos tbody tr.fila-producto");
     const filaSinResultados = document.getElementById("sinResultadosBusqueda");
+
+    document.addEventListener("click", function (e) {
+        const enlace = e.target.closest(".toggle-detalle-producto");
+        if (!enlace) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const idPanel = enlace.getAttribute("data-target");
+        const panel = idPanel ? document.getElementById(idPanel) : null;
+        if (!panel) return;
+
+        const estaAbierto = panel.classList.contains("abierto");
+        panel.classList.toggle("abierto", !estaAbierto);
+        enlace.setAttribute("aria-expanded", (!estaAbierto) ? "true" : "false");
+    }, true);
 
     if (!inputBuscador) return;
 

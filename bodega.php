@@ -5,6 +5,9 @@ if (!isset($_SESSION['nombre_usuario'])) {
     exit();
 }
 
+$cargoBodega = strtolower(trim((string)($_SESSION['nombre_cargo'] ?? '')));
+$puedeIngresarStock = in_array($cargoBodega, ['dueño', 'dueno', 'administrador', 'admin', 'owner'], true);
+
 $servidor = "localhost";
 $usuario_db = "root";          
 $password_db = "";              
@@ -15,6 +18,7 @@ $conexion = new mysqli($servidor, $usuario_db, $password_db, $base_datos);
 if ($conexion->connect_error) {
     die("Error de conexión: " . $conexion->connect_error);
 }
+$conexion->set_charset("utf8mb4");
 
 $sql = "SELECT p.id_producto, p.codigo_producto, p.nombre_producto, p.precio_producto, p.stock_actual_producto, p.stock_minimo_producto AS stock_critico_producto, c.nombre_categoria 
         FROM producto p
@@ -27,110 +31,35 @@ include 'visual/header.php';
 ?>
 
 <style>
-    .bodega-titulo {
-        color: #1f1b2e;
-        font-weight: 700;
-        margin: 0 0 4px 0;
-    }
-
-    .bodega-subtitulo {
-        color: #6f6785;
-        font-size: 13.5px;
-        margin: 0 0 18px 0;
-    }
-
-    .card-bodega-morada {
-        background-color: #ffffff;
-        border: 1px solid #e7e1f5;
-        border-radius: 10px;
-        overflow: hidden;
-        box-shadow: 0 2px 8px rgba(92, 61, 166, 0.04);
-        margin-bottom: 20px;
-    }
-
-    .bodega-toolbar {
-        background-color: #faf8fe;
-        border-bottom: 1px solid #ece6f7;
-        padding: 14px 18px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 12px;
-    }
-
-    .bodega-leyenda {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 12px;
-        font-size: 12.5px;
-        color: #554d6b;
-    }
-
-    .leyenda-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-weight: 600;
-    }
-
-    .leyenda-swatch {
-        width: 14px;
-        height: 14px;
-        border-radius: 3px;
-        display: inline-block;
-        border: 1px solid rgba(0, 0, 0, 0.08);
-    }
-
-    .tabla-bodega-morada {
-        margin-bottom: 0 !important;
-    }
-
-    .tabla-bodega-morada > thead > tr > th {
-        background-color: #f5f1fc;
-        color: #4d2c91;
-        border-bottom: 2px solid #dfd5f5 !important;
-        border-top: none !important;
-        border-color: #ece6f7;
-        font-weight: 600;
-        padding: 12px 14px;
-    }
-
-    .tabla-bodega-morada > tbody > tr > td {
-        border-color: #efeaf9 !important;
-        padding: 11px 14px;
-        vertical-align: middle;
-        color: #2b253b;
-    }
-
-    .tabla-bodega-morada > tbody > tr:hover > td:not(.celda-stock-estado) {
-        background-color: #fcfbfe;
-    }
-
-    .buscador-bodega .input-group-addon {
-        background-color: #f5f1fc;
-        border-color: #dfd7f0;
-        color: #673ab7;
-        border-radius: 7px 0 0 7px;
-    }
-
-    .buscador-bodega .form-control {
-        border-color: #dfd7f0;
-        border-radius: 0 7px 7px 0;
-        height: 36px;
-        box-shadow: none;
-    }
-
-    .buscador-bodega .form-control:focus {
-        border-color: #7c52cc;
-        box-shadow: 0 0 0 3px rgba(124, 82, 204, 0.12);
-    }
+    .bodega-titulo { color: #1f1b2e; font-weight: 700; margin: 0 0 4px 0; }
+    .bodega-subtitulo { color: #6f6785; font-size: 13.5px; margin: 0 0 18px 0; }
+    .btn-nuevo-stock-bodega { background-color: #f2ecfc !important; border: 1px solid #d8c8f5 !important; color: #4d2c91 !important; font-weight: 600; border-radius: 7px; padding: 8px 15px; outline: none !important; box-shadow: 0 2px 6px rgba(92, 61, 166, 0.05); }
+    .btn-nuevo-stock-bodega:hover, .btn-nuevo-stock-bodega:focus { background-color: #e6dcf9 !important; border-color: #c7b1f0 !important; color: #3a1f73 !important; outline: none !important; box-shadow: none !important; }
+    .card-bodega-morada { background-color: #ffffff; border: 1px solid #e7e1f5; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 61, 166, 0.04); margin-bottom: 20px; }
+    .bodega-toolbar { background-color: #faf8fe; border-bottom: 1px solid #ece6f7; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .bodega-leyenda { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 12.5px; color: #554d6b; }
+    .leyenda-item { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+    .leyenda-swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0, 0, 0, 0.08); }
+    .tabla-bodega-morada { margin-bottom: 0 !important; }
+    .tabla-bodega-morada > thead > tr > th { background-color: #f5f1fc; color: #4d2c91; border-bottom: 2px solid #dfd5f5 !important; border-top: none !important; border-color: #ece6f7; font-weight: 600; padding: 12px 14px; }
+    .tabla-bodega-morada > tbody > tr > td { border-color: #efeaf9 !important; padding: 11px 14px; vertical-align: middle; color: #2b253b; }
+    .tabla-bodega-morada > tbody > tr:hover > td:not(.celda-stock-estado) { background-color: #fcfbfe; }
+    .buscador-bodega .input-group-addon { background-color: #f5f1fc; border-color: #dfd7f0; color: #673ab7; border-radius: 7px 0 0 7px; }
+    .buscador-bodega .form-control { border-color: #dfd7f0; border-radius: 0 7px 7px 0; height: 36px; box-shadow: none; }
+    .buscador-bodega .form-control:focus { border-color: #7c52cc; box-shadow: 0 0 0 3px rgba(124, 82, 204, 0.12); }
 </style>
 
 <br>
 <h3 class="bodega-titulo"><i class="fa fa-cubes" style="color: #673ab7; margin-right: 6px;"></i> Bodega TecnoStock</h3>
 <p class="bodega-subtitulo">Control de existencias y nivel de stock crítico por producto.</p>
+
+<?php if ($puedeIngresarStock): ?>
+    <div class="clearfix" style="margin-bottom: 12px;">
+        <a href="nuevo_stock.php" class="btn btn-nuevo-stock-bodega" onmousedown="this.blur();">
+            <i class="fa fa-plus-circle"></i> Ingresar nuevo stock
+        </a>
+    </div>
+<?php endif; ?>
 
 <div class="card-bodega-morada">
     <div class="bodega-toolbar">
@@ -206,15 +135,15 @@ include 'visual/header.php';
 </div>
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
-    const inputFiltro = document.getElementById("buscadorBodega");
-    const filas = document.querySelectorAll("#tablaBodega tbody tr.fila-bodega");
-    const filaVacia = document.getElementById("sinResultadosBodega");
+(function iniciarBodega() {
+    if (window.__tecnostockBodegaInit) return;
+    window.__tecnostockBodegaInit = true;
 
-    if (!inputFiltro) return;
-
-    inputFiltro.addEventListener("input", function () {
-        const termino = this.value.toLowerCase().trim();
+    document.addEventListener("input", function (e) {
+        if (!e.target || e.target.id !== "buscadorBodega") return;
+        const termino = e.target.value.toLowerCase().trim();
+        const filas = document.querySelectorAll("#tablaBodega tbody tr.fila-bodega");
+        const filaVacia = document.getElementById("sinResultadosBodega");
         let visibles = 0;
 
         filas.forEach(function (fila) {
@@ -227,7 +156,7 @@ document.addEventListener("DOMContentLoaded", function () {
             filaVacia.style.display = (visibles === 0 && filas.length > 0) ? "" : "none";
         }
     });
-});
+})();
 </script>
 
 <?php 

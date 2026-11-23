@@ -14,6 +14,7 @@ $conexion = new mysqli($servidor, $usuario_db, $password_db, $base_datos);
 if ($conexion->connect_error) {
     die("Error de conexión: " . $conexion->connect_error);
 }
+$conexion->set_charset("utf8mb4");
 
 $id_usuario_actual = isset($_SESSION['id_usuario']) ? (int)$_SESSION['id_usuario'] : 0;
 if ($id_usuario_actual <= 0) {
@@ -28,14 +29,33 @@ if ($id_usuario_actual <= 0) {
     $stmtId->close();
 }
 
+$sqlActual = "SELECT u.id_usuario, u.nombre_usuario, u.correo_usuario, u.estado_usuario, u.telefono_usuario, c.nombre_cargo, c.descripcion_cargo
+              FROM usuario u
+              INNER JOIN cargo c ON u.id_cargo = c.id_cargo
+              WHERE u.id_usuario = ?
+              LIMIT 1";
+$stmtAct = $conexion->prepare($sqlActual);
+$stmtAct->bind_param("i", $id_usuario_actual);
+$stmtAct->execute();
+$usuarioActualDb = $stmtAct->get_result()->fetch_assoc();
+$stmtAct->close();
+
+$cargoNormalizado = strtolower(trim((string)($usuarioActualDb['nombre_cargo'] ?? $_SESSION['nombre_cargo'] ?? '')));
+$puedeEditarNombrePropio = in_array($cargoNormalizado, ['dueño', 'dueno', 'owner'], true)
+    || stripos($cargoNormalizado, 'dueñ') !== false
+    || stripos($cargoNormalizado, 'duen') !== false;
+
 $mensaje_tipo = "";
 $mensaje_texto = "";
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['actualizar_perfil'])) {
-    $nuevo_nombre = trim($_POST['nombre_usuario'] ?? '');
-    $nuevo_correo = trim($_POST['correo_usuario'] ?? '');
-    $nuevo_telefono = trim($_POST['telefono_usuario'] ?? '');
-    $nueva_clave = $_POST['clave_usuario'] ?? '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['actualizar_perfil']) && $usuarioActualDb) {
+    $nombreActualDb = (string)$usuarioActualDb['nombre_usuario'];
+    $nuevo_nombre = $puedeEditarNombrePropio
+        ? trim((string)($_POST['nombre_usuario'] ?? $nombreActualDb))
+        : $nombreActualDb;
+    $nuevo_correo = trim((string)($_POST['correo_usuario'] ?? ''));
+    $nuevo_telefono = trim((string)($_POST['telefono_usuario'] ?? ''));
+    $nueva_clave = (string)($_POST['clave_usuario'] ?? '');
 
     if ($nuevo_nombre === '' || $nuevo_correo === '') {
         $mensaje_tipo = "error";
@@ -57,8 +77,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['actualizar_perfil']))
             $stmtCheck->close();
 
             if (trim($nueva_clave) !== '') {
+                $claveHasheada = password_hash($nueva_clave, PASSWORD_DEFAULT);
                 $stmtUpd = $conexion->prepare("UPDATE usuario SET nombre_usuario = ?, correo_usuario = ?, telefono_usuario = ?, clave_usuario = ? WHERE id_usuario = ?");
-                $stmtUpd->bind_param("ssssi", $nuevo_nombre, $nuevo_correo, $nuevo_telefono, $nueva_clave, $id_usuario_actual);
+                $stmtUpd->bind_param("ssssi", $nuevo_nombre, $nuevo_correo, $nuevo_telefono, $claveHasheada, $id_usuario_actual);
             } else {
                 $stmtUpd = $conexion->prepare("UPDATE usuario SET nombre_usuario = ?, correo_usuario = ?, telefono_usuario = ? WHERE id_usuario = ?");
                 $stmtUpd->bind_param("sssi", $nuevo_nombre, $nuevo_correo, $nuevo_telefono, $id_usuario_actual);
@@ -77,12 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['actualizar_perfil']))
     }
 }
 
-$sql = "SELECT u.id_usuario, u.nombre_usuario, u.correo_usuario, u.estado_usuario, u.telefono_usuario, c.nombre_cargo, c.descripcion_cargo
-        FROM usuario u
-        INNER JOIN cargo c ON u.id_cargo = c.id_cargo
-        WHERE u.id_usuario = ?
-        LIMIT 1";
-$stmt = $conexion->prepare($sql);
+$stmt = $conexion->prepare($sqlActual);
 $stmt->bind_param("i", $id_usuario_actual);
 $stmt->execute();
 $usuario = $stmt->get_result()->fetch_assoc();
@@ -234,6 +250,12 @@ include 'visual/header.php';
         box-shadow: 0 0 0 3px rgba(124, 82, 204, 0.12);
     }
 
+    .input-suave-morado[readonly] {
+        background-color: #f6f3fb;
+        color: #6f6785;
+        cursor: not-allowed;
+    }
+
     .btn-guardar-morado {
         background-color: #673ab7;
         border-color: #5b32a3;
@@ -382,7 +404,13 @@ include 'visual/header.php';
         <div class="col-md-8">
             <div class="card-morada-suave">
                 <h4 class="seccion-form-titulo"><i class="fa fa-user-o" style="color: #673ab7; margin-right: 6px;"></i> Información personal</h4>
-                <p class="seccion-form-sub">Actualiza tus datos de contacto y contraseña de acceso.</p>
+                <p class="seccion-form-sub">
+                    <?php if ($puedeEditarNombrePropio): ?>
+                        Como Dueño puedes actualizar tu nombre, correo, teléfono y contraseña.
+                    <?php else: ?>
+                        Actualiza tu correo, teléfono y contraseña. El cambio de nombre está reservado solo para el Dueño.
+                    <?php endif; ?>
+                </p>
 
                 <form method="POST" action="misDatos.php">
                     <div class="row">
@@ -395,7 +423,7 @@ include 'visual/header.php';
                                        maxlength="80"
                                        class="form-control input-suave-morado"
                                        value="<?php echo htmlspecialchars($usuario['nombre_usuario']); ?>"
-                                       required>
+                                       <?php echo $puedeEditarNombrePropio ? 'required' : 'readonly'; ?>>
                             </div>
                         </div>
 
